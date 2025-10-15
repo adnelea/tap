@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manajer Tautan Pro (FINAL: Debouncing Anti Double-Click)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        /* CSS untuk Tampilan */
+        body { font-family: Arial, sans-serif; padding: 15px; background-color: #f4f4f9; }
+        h1, h2 { color: #333; }
+        h2 { border-bottom: 2px solid #ddd; padding-bottom: 5px; margin-top: 25px; }
+        
+        /* Input Teks */
+        #input-container { display: flex; margin-bottom: 10px; gap: 10px; }
+        #linkInput { 
+            flex-grow: 1; height: 80px; padding: 12px; border: 1px solid #ccc; 
+            border-radius: 5px; font-size: 14px; resize: vertical; 
+        }
+        #addButton { 
+            padding: 12px 18px; background-color: #007bff; color: white; 
+            border: none; border-radius: 5p x; cursor: pointer; font-size: 16px;
+            white-space: nowrap; align-self: flex-start; 
+        }
+        #addButton:hover { background-color: #0056b3; }
+
+        /* Input File */
+        .file-upload-section { margin-top: 15px; margin-bottom: 20px; display: flex; align-items: center; }
+        .file-label {
+            padding: 10px 15px; background-color: #ffc107; color: #333; 
+            border-radius: 5px; cursor: pointer; font-size: 16px; 
+            font-weight: bold; white-space: nowrap;
+        }
+        #fileNameDisplay { margin-left: 10px; color: #555; font-size: 14px; }
+        
+        /* Daftar Tautan */
+        .link-list { list-style-type: none; padding: 0; }
+        .link-list li { 
+            background-color: white; margin-bottom: 8px; border-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+        }
+        .link-list a { 
+            text-decoration: none; color: #333; padding: 12px; display: block; 
+            word-wrap: break-word; overflow: hidden; 
+        }
+        .link-list a:hover { background-color: #e9ecef; border-radius: 5px; }
+
+        /* Styling Daftar Selesai */
+        #clicked-list-container { padding: 10px; background-color: #fff; border-radius: 5px; border: 1px solid #e0e0e0; }
+        #clicked-list a { color: #888; text-decoration: line-through; }
+        #clicked-list a:hover { background-color: #f8f8f8; }
+
+        /* Tombol Aksi */
+        .action-buttons button {
+            padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; 
+            margin-right: 10px; margin-top: 10px; font-weight: bold;
+        }
+        #downloadButton { background-color: #28a745; color: white; }
+        #copyButton { background-color: #ffc107; color: #333; }
+        #undoButton { background-color: #ff9800; color: white; }
+        #resetButton { background-color: #dc3545; color: white; }
+
+        /* Status Tombol Disabled */
+        .action-buttons button:disabled {
+            background-color: #cccccc !important;
+            color: #666;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Manajer Tautan</h1>
+    
+    <div id="input-container">
+        <textarea id="linkInput" placeholder="Tempel banyak URL di sini. Pisahkan dengan ENTER atau baris baru..." required></textarea>
+        <button id="addButton">Tambah Batch</button>
+    </div>
+    
+    <div class="file-upload-section">
+        <label for="fileInput" class="file-label">
+            Unggah File Teks (.txt)
+        </label>
+        <input type="file" id="fileInput" accept=".txt" style="display: none;">
+        <span id="fileNameDisplay">(Belum ada file dipilih)</span>
+    </div>
+
+    <hr>
+    
+    <div class="action-buttons" style="margin-bottom: 20px;">
+        <button id="undoButton" disabled>
+            ⏪ Undo (Batalkan Aksi Terakhir)
+        </button>
+    </div>
+
+    <h2>Tautan Belum Diklik (⭐ <span id="count-unclicked">0</span>)</h2>
+    <ul id="unclicked-list" class="link-list">
+        </ul>
+    
+    <p id="unclicked-more-info" style="color: #6c757d; font-size: 14px; margin-top: 5px;"></p>
+
+    <h2>Tautan Sudah Diklik (✅ <span id="count-clicked">0</span>)</h2>
+    <div class="action-buttons">
+        <button id="copyButton">Salin Daftar Selesai</button>
+        <button id="downloadButton">Download Daftar Selesai (.txt)</button>
+        <button id="resetButton">🗑️ Hapus Semua Data</button>
+    </div>
+    <div id="clicked-list-container">
+        <ul id="clicked-list" class="link-list">
+        </ul>
+    </div>
+    
+    <p id="clicked-more-info" style="color: #6c757d; font-size: 14px; margin-top: 5px;"></p>
+
+    <script>
+        // JAVASCRIPT dengan FITUR DEBOUNCING ANTI DOUBLE-CLICK
+        document.addEventListener('DOMContentLoaded', function() {
+            
+            // --- DEKLARASI KONSTANTA DAN ELEMEN DOM ---
+            const linkInput = document.getElementById('linkInput');
+            const addButton = document.getElementById('addButton');
+            const fileInput = document.getElementById('fileInput');
+            const fileNameDisplay = document.getElementById('fileNameDisplay');
+            const unclickedList = document.getElementById('unclicked-list');
+            const clickedList = document.getElementById('clicked-list');
+            const countUnclicked = document.getElementById('count-unclicked');
+            const countClicked = document.getElementById('count-clicked');
+            const unclickedMoreInfo = document.getElementById('unclicked-more-info'); 
+            const clickedMoreInfo = document.getElementById('clicked-more-info');     
+            const downloadButton = document.getElementById('downloadButton');
+            const copyButton = document.getElementById('copyButton');
+            const undoButton = document.getElementById('undoButton'); 
+            const resetButton = document.getElementById('resetButton'); 
+
+            // --- MANAJEMEN RIWAYAT (HISTORY STACK) ---
+            const STORAGE_KEY = 'link_manager_data_pro';
+            const HISTORY_KEY = 'link_manager_history_stack';
+            
+            let history = {
+                stack: [],
+                currentIndex: -1
+            };
+            const MAX_HISTORY_SIZE = 20;
+
+            function getInitialData() {
+                return {
+                    unclicked: [
+                        "https://t.ackinacki.com?startapp=eyJyZWZlcnJlciI6ImF5c2dsIiwicG9waXQiOiIyMjkxZjA4NC1jNDZkLTRkMzYtOWY1OC0xOGE2NmYzYjUxNjMifQ",
+                        "https://t.ackinacki.com?startapp=eyJyZWZlcnJlciI6ImFkZW52IiwicG9waXQiOiJhMDRmZDQzZi1mY2FkLTQxNzktYmI4Yy0zMjllMmI4MmNkMzgifQ",
+                        "https://t.ackinacki.com?startapp=eyJyZWZlcnJlciI6Im1ldF8xMSIsInBvcGl0IjoiY2MwY2M4YjQtNTYxZi00ODc4LThmYmUtYWRlM2U0ODBjYWEyIn0",
+                        "https://t.ackinacki.com?startapp=eyJyZWZlcnJlciI6Im11YmVlZnRhIiwicG9waXQiOiI1N2EzNTkyZi0zZmNlLTQ5NmQtODFlZi00NmNiYmM2OWJmZjgifQ"
+                    ], 
+                    clicked: [] 
+                };
+            }
+            
+            function getStoredData() {
+                if (history.currentIndex >= 0 && history.currentIndex < history.stack.length) {
+                    return history.stack[history.currentIndex];
+                }
+                const data = localStorage.getItem(STORAGE_KEY);
+                return data ? JSON.parse(data) : getInitialData();
+            }
+            
+            function saveHistory(data) {
+                history.stack = history.stack.slice(0, history.currentIndex + 1);
+                history.stack.push(JSON.parse(JSON.stringify(data))); 
+                history.currentIndex++;
+
+                if (history.stack.length > MAX_HISTORY_SIZE) {
+                    history.stack.shift(); 
+                    history.currentIndex--;
+                }
+
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+                
+                updateUndoButton();
+            }
+
+            function loadHistory() {
+                const storedHistory = localStorage.getItem(HISTORY_KEY);
+                if (storedHistory) {
+                    history = JSON.parse(storedHistory);
+                } else {
+                    saveHistory(getStoredData());
+                }
+                renderLists();
+            }
+            
+            function updateUndoButton() {
+                undoButton.disabled = history.currentIndex <= 0;
+            }
+
+            // --- FUNGSI RESET DATA ---
+            function resetAllData() {
+                if (!confirm("⚠️ PERINGATAN: Apakah Anda yakin ingin MENGHAPUS SEMUA tautan (Belum Diklik dan Sudah Diklik)? Aksi ini tidak dapat dibatalkan!")) {
+                    return;
+                }
+                
+                localStorage.removeItem(STORAGE_KEY);
+                localStorage.removeItem(HISTORY_KEY);
+
+                history = { stack: [], currentIndex: -1 };
+                
+                const initialData = getInitialData();
+                saveHistory(initialData);
+                renderLists();
+                
+                alert("Semua data tautan berhasil dihapus dan direset ke daftar awal.");
+            }
+
+            // --- FUNGSI UNDO ---
+            function performUndo() {
+                if (history.currentIndex <= 0) return;
+
+                history.currentIndex--;
+                
+                const previousData = history.stack[history.currentIndex];
+
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(previousData));
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+                
+                renderLists(); 
+                updateUndoButton();
+            }
+            
+            // --- FUNGSI PEMBUAT ELEMENT ---
+            function createListItem(url, isClicked = false) {
+                const newListItem = document.createElement('li');
+                const newLink = document.createElement('a');
+                
+                newLink.textContent = url.length > 80 ? url.substring(0, 77) + '...' : url;
+                
+                if (!isClicked) {
+                    newLink.setAttribute('onclick', `window.moveItemToClicked(this, '${url}')`);
+                } else {
+                    newLink.href = url;
+                    newLink.target = "_blank"; 
+                }
+
+                newListItem.appendChild(newLink);
+                return newListItem;
+            }
+
+            // --- DEBOUNCING FLAG (UNTUK MENCEGAH DOUBLE CLICK) ---
+            let isProcessingMove = false; 
+
+            // --- FUNGSI PEMINDAHAN (STABIL + DEBOUNCING) ---
+            window.moveItemToClicked = function(tautanElement, urlToMove) {
+                
+                if (isProcessingMove) {
+                    // Mencegah eksekusi ganda dalam rentang waktu singkat
+                    return; 
+                }
+                isProcessingMove = true; // Kunci fungsi
+                
+                // 1. JAVASCRIPT MEMBUKA LINK SECARA EKSPLISIT DI TAB BARU
+                window.open(urlToMove, '_blank');
+                
+                // 2. TUNDA PROSES PEMINDAHAN untuk memberi waktu JS berjalan
+                setTimeout(() => {
+                    let data = getStoredData(); 
+                    
+                    const isFound = data.unclicked.includes(urlToMove);
+                    if (!isFound) {
+                        // Jika item tidak ditemukan, buka kunci dan keluar
+                        isProcessingMove = false;
+                        return; 
+                    }
+
+                    data.unclicked = data.unclicked.filter(url => url !== urlToMove);
+                    if (!data.clicked.includes(urlToMove)) {
+                        data.clicked.unshift(urlToMove); 
+                    }
+                    
+                    saveHistory(data);
+                    renderLists();
+
+                    // 3. Buka kunci flag setelah delay lagi untuk mencegah double-click
+                    setTimeout(() => {
+                        isProcessingMove = false; 
+                    }, 500); // Tunda 500ms sebelum mengizinkan klik berikutnya
+
+                }, 100); 
+            }
+            
+            function processNewLinks(linksArray) {
+                if (linksArray.length === 0) return;
+                
+                let data = getStoredData();
+                let addedCount = 0;
+                let currentUnclicked = [...data.unclicked];
+
+                linksArray.forEach(urlText => {
+                    let url = urlText.trim();
+                    if (!url) return;
+                    
+                    if (!url.match(/^(https?:\/\/|ftps?:\/\/|www\.)/i)) {
+                        url = 'http://' + url;
+                    }
+
+                    const isDuplicate = data.unclicked.includes(url) || data.clicked.includes(url);
+                    
+                    if (!isDuplicate) {
+                        currentUnclicked.unshift(url);
+                        addedCount++;
+                    }
+                });
+                
+                if (addedCount > 0) {
+                    data.unclicked = currentUnclicked;
+                    saveHistory(data);
+                }
+            }
+            
+            // --- FUNGSI UNGGAH TXT (STABIL) ---
+            function handleFileSelect(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                fileNameDisplay.textContent = `File dipilih: ${file.name}`;
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const content = e.target.result; 
+                    
+                    const linksFromFile = content
+                        .replace(/\r\n/g, '\n') 
+                        .replace(/\r/g, '\n')   
+                        .split('\n')           
+                        .map(link => link.trim())
+                        .filter(link => link !== '');
+
+                    processNewLinks(linksFromFile);
+
+                    fileInput.value = ''; 
+                    fileNameDisplay.textContent = '(Belum ada file dipilih)';
+                };
+                reader.readAsText(file);
+            }
+
+            function downloadClickedLinks() {
+                const data = getStoredData();
+                if (data.clicked.length === 0) {
+                    alert("Daftar link yang sudah diklik masih kosong!");
+                    return;
+                }
+
+                const content = data.clicked.join('\n');
+                const blob = new Blob([content], { type: 'text/plain' });
+
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'link_selesai_' + new Date().toISOString().slice(0, 10) + '.txt';
+
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
+
+            function copyClickedLinks() {
+                const data = getStoredData();
+                if (data.clicked.length === 0) {
+                    alert("Daftar link yang sudah diklik masih kosong!");
+                    return;
+                }
+
+                const content = data.clicked.join('\n');
+
+                navigator.clipboard.writeText(content).then(() => {
+                    alert("Daftar link yang sudah diklik berhasil disalin ke clipboard!");
+                }).catch(err => {
+                    alert("Gagal menyalin. Silakan coba salin secara manual.");
+                });
+            }
+
+
+            // --- RENDER TAMPILAN (DIBATASI 5 BARIS) ---
+            function renderLists() {
+                const data = getStoredData();
+
+                unclickedList.innerHTML = '';
+                clickedList.innerHTML = '';
+
+                // Logika pembatasan: hanya tampilkan 5 item teratas
+                const topUnclicked = data.unclicked.slice(0, 5); 
+                topUnclicked.forEach(url => {
+                    unclickedList.appendChild(createListItem(url, false));
+                });
+
+                const topClicked = data.clicked.slice(0, 5);
+                topClicked.forEach(url => {
+                    clickedList.appendChild(createListItem(url, true));
+                });
+                
+                updateCounts(data);
+            }
+
+            function updateCounts(data) {
+                
+                // Update counter total di judul
+                countUnclicked.textContent = data.unclicked.length;
+                countClicked.textContent = data.clicked.length;
+                
+                // Update info sisa item
+                const unclickedCount = data.unclicked.length;
+                const clickedCount = data.clicked.length;
+
+                if (unclickedCount > 5) {
+                    unclickedMoreInfo.textContent = `... dan ${unclickedCount - 5} tautan lain tidak ditampilkan.`;
+                } else {
+                    unclickedMoreInfo.textContent = '';
+                }
+
+                if (clickedCount > 5) {
+                    clickedMoreInfo.textContent = `... dan ${clickedCount - 5} tautan lain tidak ditampilkan.`;
+                } else {
+                    clickedMoreInfo.textContent = '';
+                }
+            }
+
+            // --- INITIALISASI & EVENT LISTENERS ---
+            loadHistory(); 
+
+            // Input Teks (Batch)
+            addButton.addEventListener('click', () => {
+                const inputText = linkInput.value;
+                if (inputText) {
+                    const links = inputText.split('\n').filter(link => link.trim() !== '');
+                    processNewLinks(links);
+                    linkInput.value = '';
+                    linkInput.focus();
+                }
+            });
+
+            linkInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) { 
+                    e.preventDefault(); 
+                    addButton.click();
+                }
+            });
+            
+            // Input File TXT
+            fileInput.addEventListener('change', handleFileSelect);
+
+            // Tombol Aksi
+            downloadButton.addEventListener('click', downloadClickedLinks);
+            copyButton.addEventListener('click', copyClickedLinks);
+            
+            // Tombol UNDO
+            undoButton.addEventListener('click', performUndo);
+            
+            // Tombol RESET
+            resetButton.addEventListener('click', resetAllData);
+
+        });
+    </script>
+</body>
+</html>
+
